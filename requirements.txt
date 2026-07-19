@@ -1,0 +1,8 @@
+# Dipendenze core del simulatore
+requests>=2.31.0
+pandas>=2.0.0
+numpy>=1.26.0
+scipy>=1.11.0
+
+# Interfaccia web opzionale (solo per app_streamlit.py)
+streamlit>=1.32.0
