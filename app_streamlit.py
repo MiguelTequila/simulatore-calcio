@@ -79,15 +79,28 @@ class QuoteMatch:
 # MODELLO DI POISSON + CALIBRAZIONE SULLE QUOTE
 # ===========================================================================
 
-def lambdas_da_statistiche(casa: StatisticheSquadra, fuori: StatisticheSquadra):
-    """λ base dal modello attacco/difesa (Maher, 1982)."""
-    att_casa = casa.gol_fatti_media / MEDIA_GOL_CASA_LEGA
-    dif_fuori = fuori.gol_subiti_media / MEDIA_GOL_CASA_LEGA
-    lam_casa = MEDIA_GOL_CASA_LEGA * att_casa * dif_fuori
+def lambdas_da_statistiche(casa: StatisticheSquadra, fuori: StatisticheSquadra,
+                           campo_neutro: bool = False):
+    """
+    λ base dal modello attacco/difesa (Maher, 1982).
 
-    att_fuori = fuori.gol_fatti_media / MEDIA_GOL_FUORI_LEGA
-    dif_casa = casa.gol_subiti_media / MEDIA_GOL_FUORI_LEGA
-    lam_fuori = MEDIA_GOL_FUORI_LEGA * att_fuori * dif_casa
+    Campo neutro: si usa la STESSA media di riferimento per entrambe
+    (media tra casa e trasferta di lega) e nessuna squadra riceve il
+    vantaggio del fattore campo. Corretto per finali, tornei, gare
+    in sede unica.
+    """
+    if campo_neutro:
+        m = (MEDIA_GOL_CASA_LEGA + MEDIA_GOL_FUORI_LEGA) / 2  # 1.35
+        lam_casa = m * (casa.gol_fatti_media / m) * (fuori.gol_subiti_media / m)
+        lam_fuori = m * (fuori.gol_fatti_media / m) * (casa.gol_subiti_media / m)
+    else:
+        att_casa = casa.gol_fatti_media / MEDIA_GOL_CASA_LEGA
+        dif_fuori = fuori.gol_subiti_media / MEDIA_GOL_CASA_LEGA
+        lam_casa = MEDIA_GOL_CASA_LEGA * att_casa * dif_fuori
+
+        att_fuori = fuori.gol_fatti_media / MEDIA_GOL_FUORI_LEGA
+        dif_casa = casa.gol_subiti_media / MEDIA_GOL_FUORI_LEGA
+        lam_fuori = MEDIA_GOL_FUORI_LEGA * att_fuori * dif_casa
 
     return (float(np.clip(lam_casa, 0.2, 4.5)),
             float(np.clip(lam_fuori, 0.2, 4.5)))
@@ -191,6 +204,52 @@ def esegui_monte_carlo(lam_casa: float, lam_fuori: float,
     return RisultatiSimulazione(rng.poisson(lam_c_i), rng.poisson(lam_f_i), n_iter)
 
 
+def risolvi_eliminazione(ris: RisultatiSimulazione, lam_casa: float,
+                         lam_fuori: float, seed: int | None = None):
+    """
+    Per gare a eliminazione diretta: nelle iterazioni finite in pareggio
+    dopo i 90', simula i supplementari (λ ridotti a 1/3, cioè 30' su 90')
+    e, se ancora pari, i rigori (50/50 — l'evidenza empirica non mostra
+    vantaggi sistematici affidabili).
+
+    Restituisce un dizionario con le probabilità di passare il turno e
+    la ripartizione per modalità (90', supplementari, rigori).
+    """
+    rng = np.random.default_rng(seed)
+    n = ris.n_iterazioni
+
+    vince_c_90 = ris.gol_casa > ris.gol_fuori
+    vince_f_90 = ris.gol_casa < ris.gol_fuori
+    pari_90 = ris.gol_casa == ris.gol_fuori
+    n_pari = int(pari_90.sum())
+
+    # Supplementari: 30 minuti -> λ/3
+    sup_c = rng.poisson(lam_casa / 3.0, n_pari)
+    sup_f = rng.poisson(lam_fuori / 3.0, n_pari)
+    vince_c_sup = sup_c > sup_f
+    vince_f_sup = sup_c < sup_f
+    pari_sup = sup_c == sup_f
+
+    # Rigori: moneta equa
+    rigori_casa = rng.random(int(pari_sup.sum())) < 0.5
+
+    p_c_90 = vince_c_90.sum() / n
+    p_f_90 = vince_f_90.sum() / n
+    p_c_sup = vince_c_sup.sum() / n
+    p_f_sup = vince_f_sup.sum() / n
+    p_c_rig = rigori_casa.sum() / n
+    p_f_rig = (len(rigori_casa) - rigori_casa.sum()) / n
+
+    return {
+        "passa_casa": float(p_c_90 + p_c_sup + p_c_rig),
+        "passa_fuori": float(p_f_90 + p_f_sup + p_f_rig),
+        "casa_90": float(p_c_90), "fuori_90": float(p_f_90),
+        "casa_sup": float(p_c_sup), "fuori_sup": float(p_f_sup),
+        "casa_rig": float(p_c_rig), "fuori_rig": float(p_f_rig),
+        "p_supplementari": float(pari_90.sum() / n),
+    }
+
+
 # ===========================================================================
 # INTERFACCIA STREAMLIT
 # ===========================================================================
@@ -207,6 +266,16 @@ with col_a:
 with col_b:
     data_match = st.date_input("Data del match")
     fuori = st.text_input("Squadra fuori casa", "Lazio")
+
+t1, t2 = st.columns(2)
+campo_neutro = t1.checkbox(
+    "🏟️ Campo neutro",
+    help="Finali e tornei in sede unica: elimina il vantaggio del fattore "
+         "campo. Inserisci le medie gol COMPLESSIVE (non solo casa/fuori).")
+eliminazione = t2.checkbox(
+    "⚔️ Eliminazione diretta",
+    help="Se pareggio ai 90': simula supplementari (λ/3) e rigori (50/50) "
+         "e calcola chi passa il turno.")
 
 st.subheader("Statistiche squadre")
 c1, c2 = st.columns(2)
@@ -235,11 +304,12 @@ if usa_quote:
     quote = QuoteMatch(quota_1, quota_x, quota_2, quota_o, quota_u)
 
 if st.button("🎲 Simula la partita", type="primary"):
-    st_casa = StatisticheSquadra(casa, gf_c, gs_c, list(forma_c.upper()))
-    st_fuori = StatisticheSquadra(fuori, gf_f, gs_f, list(forma_f.upper()))
+    # [-5:] = solo le ultime 5 lettere della forma, anche se ne scrivi di più
+    st_casa = StatisticheSquadra(casa, gf_c, gs_c, list(forma_c.upper())[-5:])
+    st_fuori = StatisticheSquadra(fuori, gf_f, gs_f, list(forma_f.upper())[-5:])
 
     # Pipeline: λ statistici -> calibrazione quote -> correzione forma
-    lam_c, lam_f = lambdas_da_statistiche(st_casa, st_fuori)
+    lam_c, lam_f = lambdas_da_statistiche(st_casa, st_fuori, campo_neutro)
     lam_c, lam_f = calibra_con_quote(lam_c, lam_f, quote)
     lam_c *= st_casa.punteggio_forma()
     lam_f *= st_fuori.punteggio_forma()
@@ -271,6 +341,20 @@ if st.button("🎲 Simula la partita", type="primary"):
         {"Probabilità": list(dist.values())},
         index=[f"{g}+" if g == max(dist) else str(g) for g in dist],
     ))
+
+    if eliminazione:
+        st.subheader("⚔️ Passaggio del turno")
+        elim = risolvi_eliminazione(ris, lam_c, lam_f)
+        e1, e2 = st.columns(2)
+        e1.metric(f"Passa {casa}", f"{elim['passa_casa']:.1%}")
+        e2.metric(f"Passa {fuori}", f"{elim['passa_fuori']:.1%}")
+        st.caption(
+            f"Pareggio ai 90': {elim['p_supplementari']:.1%} dei casi. "
+            f"Ripartizione {casa}: 90' {elim['casa_90']:.1%} · "
+            f"suppl. {elim['casa_sup']:.1%} · rigori {elim['casa_rig']:.1%}. "
+            f"{fuori}: 90' {elim['fuori_90']:.1%} · "
+            f"suppl. {elim['fuori_sup']:.1%} · rigori {elim['fuori_rig']:.1%}."
+        )
 
     st.info("Probabilità descrittive del mercato, non consigli di scommessa. "
             "Un modello calibrato sulle quote non può batterle.")
