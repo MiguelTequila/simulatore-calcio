@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+  <title>⚽ Simulatore Predittivo di Partite</title>
+  <!-- stlite: Streamlit in-browser via WebAssembly (Pyodide) -->
+  <link rel="stylesheet"
+        href="https://cdn.jsdelivr.net/npm/@stlite/browser@0.85.1/build/stlite.css" />
+  <style>
+    /* Messaggio mostrato durante il caricamento di Pyodide (~15-30s la prima volta) */
+    #loading { font-family: sans-serif; text-align: center; padding: 3rem; color: #555; }
+  </style>
+</head>
+<body>
+  <div id="root">
+    <div id="loading">
+      ⚽ Caricamento del motore Python nel browser…<br/>
+      La prima apertura richiede 15–30 secondi (download di Pyodide + scipy).
+    </div>
+  </div>
+
+  <script type="module">
+    import { mount } from "https://cdn.jsdelivr.net/npm/@stlite/browser@0.85.1/build/stlite.js";
+
+    // I file .py vengono caricati DIRETTAMENTE dal repository servito da
+    // GitHub Pages (URL relativi): nessuna duplicazione di codice.
+    // Modifichi src/ -> push -> il sito si aggiorna da solo.
+    const py = (path) => ({ url: path, opts: { encoding: "utf8" } });
+
+    mount(
+      {
+        requirements: ["scipy", "pandas", "requests"],
+        entrypoint: "app_streamlit.py",
+        files: {
+          "app_streamlit.py":            py("./app_streamlit.py"),
+          "src/__init__.py":             py("./src/__init__.py"),
+          "src/config.py":               py("./src/config.py"),
+          "src/data_fetcher.py":         py("./src/data_fetcher.py"),
+          "src/render.py":               py("./src/render.py"),
+          "src/models/__init__.py":      py("./src/models/__init__.py"),
+          "src/models/poisson_model.py": py("./src/models/poisson_model.py"),
+          "src/models/monte_carlo.py":   py("./src/models/monte_carlo.py"),
+        },
+        streamlitConfig: {
+          "client.toolbarMode": "viewer",
+        },
+      },
+      document.getElementById("root"),
+    );
+  </script>
+</body>
+</html>
