@@ -337,6 +337,32 @@ COMPETIZIONI = {
 ALTRA = "✏️ Altra squadra…"
 
 
+def media_inizio_stagione(scorsa: float, corrente: float, giornate: int,
+                          neopromossa: bool, gol_subiti: bool,
+                          media_lega: float = 1.35) -> float:
+    """
+    Media gol da usare a inizio stagione, quando le partite giocate
+    sono poche e la media corrente è ancora rumore.
+
+    Logica:
+      - Base = stagione scorsa "tirata" verso la media di lega
+        (0.6 x scorsa + 0.4 x 1.35), perché mercato e cambi allenatore
+        erodono le prestazioni passate.
+      - Per le NEOPROMOSSE la stagione scorsa (categoria inferiore) non
+        vale nulla: base = profilo storico della neopromossa tipo
+        (~1.0 gol fatti, ~1.6 subiti).
+      - Il peso della stagione corrente cresce linearmente con le
+        giornate giocate: 0 giornate = solo base, 10+ giornate = solo
+        stagione corrente.
+    """
+    if neopromossa:
+        base = 1.6 if gol_subiti else 1.0
+    else:
+        base = 0.6 * scorsa + 0.4 * media_lega
+    peso_corrente = min(max(giornate, 0) / 10.0, 1.0)
+    return round(peso_corrente * corrente + (1 - peso_corrente) * base, 2)
+
+
 def opzioni_squadre(competizione: str) -> list:
     """Elenco squadre per la competizione scelta + voce a inserimento libero."""
     squadre = []
@@ -367,6 +393,91 @@ st.set_page_config(page_title="Simulatore Calcio", page_icon="⚽")
 st.title("⚽ Simulatore Predittivo di Partite")
 st.caption("Poisson calibrato sulle quote + Monte Carlo Gamma-Poisson "
            f"({N_SIMULAZIONI:,} iterazioni)".replace(",", "."))
+
+# ---------------------------------------------------------------------------
+# ISTRUZIONI D'USO
+# ---------------------------------------------------------------------------
+with st.expander("📖 Istruzioni: come si usa"):
+    st.markdown("""
+**1. Scegli la competizione** — la tendina delle squadre si adatta da sola.
+Squadra non in elenco (coppe nazionali, club minori)? Usa *✏️ Altra squadra*.
+
+**2. Inserisci le medie gol** (campi "Gol fatti/subiti a partita"):
+- **Dove trovarle:** *soccerstats.com* → campionato → tab *Home & Away
+  tables* (medie casa e trasferta per squadra); in alternativa *FBref*
+  o chiedendo a un'AI le medie delle ultime 10 partite ufficiali.
+- **Partita normale:** medie IN CASA per la squadra di casa, IN
+  TRASFERTA per l'ospite.
+- **Campo neutro attivo:** medie COMPLESSIVE (tutte le partite) per
+  entrambe.
+- **Prime ~10 giornate di campionato:** non usare le medie grezze
+  (troppo rumore) — apri il *🧮 Calcolatore inizio stagione* qui sotto
+  e copia i valori che ti restituisce.
+
+**3. Forma (ultime 5, es. WWDLW)** — solo partite ufficiali, MAI
+amichevoli di club. Prima della 5ª giornata lasciala **vuota**: campo
+vuoto = effetto neutro, ed è corretto così. Per le nazionali le
+amichevoli contro pari livello si possono contare.
+
+**4. Interruttori:**
+- *🏟️ Campo neutro* — finali e sedi uniche: toglie il vantaggio casa.
+- *⚔️ Eliminazione diretta* — aggiunge supplementari, rigori e la
+  probabilità di passare il turno.
+- *🔁 Gara di ritorno* — inserisci il risultato dell'andata: il
+  passaggio turno è calcolato sull'aggregato (gol in trasferta aboliti).
+
+**5. Quote bookmaker** — inseriscile sempre se le hai: pesano il 70%
+del modello e correggono i tuoi input imprecisi. Copiale da qualunque
+bookmaker in formato decimale.
+
+**6. Leggi l'output per quello che è** — probabilità descrittive del
+mercato. Il risultato esatto più probabile esce comunque ~1 volta su 8:
+un centro non prova che il modello è buono, un buco non prova che è
+rotto. Contano 30+ partite, non una.
+""")
+
+# ---------------------------------------------------------------------------
+# CALCOLATORE INIZIO STAGIONE
+# ---------------------------------------------------------------------------
+with st.expander("🧮 Calcolatore inizio stagione (prime ~10 giornate)"):
+    st.caption("Miscela stagione scorsa e corrente in base alle giornate "
+               "giocate. Compilalo una squadra alla volta e copia i due "
+               "valori nei campi delle statistiche.")
+    giornate = st.number_input("Giornate di campionato già giocate",
+                               0, 15, 0, key="calc_g")
+    neopromossa = st.checkbox(
+        "Squadra neopromossa",
+        key="calc_np",
+        help="I numeri della categoria inferiore non valgono: si parte "
+             "dal profilo storico della neopromossa tipo (1.0 fatti, "
+             "1.6 subiti).")
+    c_sx, c_dx = st.columns(2)
+    with c_sx:
+        st.markdown("**Gol fatti / partita**")
+        gf_scorsa = st.number_input("Media stagione scorsa", 0.0, 5.0, 1.5,
+                                    0.05, key="calc_gfs",
+                                    disabled=neopromossa)
+        gf_corr = st.number_input("Media stagione corrente", 0.0, 5.0, 1.5,
+                                  0.05, key="calc_gfc",
+                                  disabled=(giornate == 0))
+    with c_dx:
+        st.markdown("**Gol subiti / partita**")
+        gs_scorsa = st.number_input("Media stagione scorsa ", 0.0, 5.0, 1.2,
+                                    0.05, key="calc_gss",
+                                    disabled=neopromossa)
+        gs_corr = st.number_input("Media stagione corrente ", 0.0, 5.0, 1.2,
+                                  0.05, key="calc_gsc",
+                                  disabled=(giornate == 0))
+    v_gf = media_inizio_stagione(gf_scorsa, gf_corr, giornate,
+                                 neopromossa, gol_subiti=False)
+    v_gs = media_inizio_stagione(gs_scorsa, gs_corr, giornate,
+                                 neopromossa, gol_subiti=True)
+    r1, r2 = st.columns(2)
+    r1.metric("→ Gol fatti da inserire", f"{v_gf:.2f}")
+    r2.metric("→ Gol subiti da inserire", f"{v_gs:.2f}")
+    if giornate >= 10:
+        st.caption("Con 10+ giornate il calcolatore restituisce la "
+                   "stagione corrente pura: puoi smettere di usarlo.")
 
 competizione = st.selectbox("Competizione", list(COMPETIZIONI.keys()))
 if competizione == "Amichevole":
