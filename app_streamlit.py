@@ -60,6 +60,8 @@ class QuoteMatch:
     quota_2: float
     quota_over25: float | None = None
     quota_under25: float | None = None
+    quota_gg: float | None = None    # Goal: entrambe segnano
+    quota_ng: float | None = None    # NoGoal
 
     def probabilita_implicite_1x2(self):
         """Quote 1X2 -> probabilità de-marginate (metodo proporzionale)."""
@@ -73,6 +75,17 @@ class QuoteMatch:
             return None
         raw_o, raw_u = 1 / self.quota_over25, 1 / self.quota_under25
         return raw_o / (raw_o + raw_u)
+
+    def probabilita_implicita_gg(self):
+        """
+        Probabilità de-marginata del Goal (GG). NON entra nella
+        calibrazione — i due λ sono già fissati da 1X2 e O/U 2.5 — ma
+        serve come CONFRONTO diagnostico col GG calcolato dal modello.
+        """
+        if not self.quota_gg or not self.quota_ng:
+            return None
+        raw_g, raw_n = 1 / self.quota_gg, 1 / self.quota_ng
+        return raw_g / (raw_g + raw_n)
 
 
 # ===========================================================================
@@ -541,7 +554,15 @@ if usa_quote:
     q4, q5 = st.columns(2)
     quota_o = q4.number_input("Quota Over 2.5", 1.01, 10.0, 1.90, 0.05)
     quota_u = q5.number_input("Quota Under 2.5", 1.01, 10.0, 1.90, 0.05)
-    quote = QuoteMatch(quota_1, quota_x, quota_2, quota_o, quota_u)
+    q6, q7 = st.columns(2)
+    quota_g = q6.number_input(
+        "Quota Goal (GG)", 1.01, 10.0, 1.85, 0.05,
+        help="Entrambe le squadre segnano. Non calibra il modello (i due "
+             "λ sono già fissati da 1X2 e O/U): serve come confronto "
+             "diagnostico mercato vs modello.")
+    quota_n = q7.number_input("Quota NoGoal (NG)", 1.01, 10.0, 1.85, 0.05)
+    quote = QuoteMatch(quota_1, quota_x, quota_2, quota_o, quota_u,
+                       quota_g, quota_n)
 
 if st.button("🎲 Simula la partita", type="primary"):
     # [-5:] = solo le ultime 5 lettere della forma, anche se ne scrivi di più
@@ -574,6 +595,20 @@ if st.button("🎲 Simula la partita", type="primary"):
     m5.metric("Under 2.5", f"{ris.p_under25:.1%}")
     m6.metric("Goal (GG)", f"{ris.p_goal:.1%}")
     m7.metric("NoGoal (NG)", f"{ris.p_nogoal:.1%}")
+
+    # --- Confronto diagnostico GG: modello vs mercato ---
+    gg_mercato = quote.probabilita_implicita_gg() if quote else None
+    if gg_mercato is not None:
+        delta = ris.p_goal - gg_mercato
+        st.caption(f"🔍 GG — modello: {ris.p_goal:.1%} · mercato "
+                   f"(de-marginato): {gg_mercato:.1%} · scarto: "
+                   f"{delta:+.1%}")
+        if abs(delta) > 0.05:
+            st.warning(
+                f"Scarto GG di {abs(delta):.1%} tra modello e mercato: "
+                "controlla i dati inseriti (medie gol, quote) oppure il "
+                "mercato sta prezzando qualcosa che le tue statistiche "
+                "non vedono (infortuni, assenze, turnover).")
 
     st.subheader("Distribuzione gol totali")
     dist = ris.distribuzione_gol_totali()
