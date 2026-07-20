@@ -205,22 +205,28 @@ def esegui_monte_carlo(lam_casa: float, lam_fuori: float,
 
 
 def risolvi_eliminazione(ris: RisultatiSimulazione, lam_casa: float,
-                         lam_fuori: float, seed: int | None = None):
+                         lam_fuori: float, andata: tuple = (0, 0),
+                         seed: int | None = None):
     """
-    Per gare a eliminazione diretta: nelle iterazioni finite in pareggio
-    dopo i 90', simula i supplementari (λ ridotti a 1/3, cioè 30' su 90')
-    e, se ancora pari, i rigori (50/50 — l'evidenza empirica non mostra
-    vantaggi sistematici affidabili).
+    Per gare a eliminazione diretta: chi passa il turno?
 
-    Restituisce un dizionario con le probabilità di passare il turno e
-    la ripartizione per modalità (90', supplementari, rigori).
+    `andata` = (gol squadra ora in casa segnati all'andata, gol squadra
+    ora fuori). Con (0, 0) equivale a una gara secca. Il confronto è sul
+    punteggio AGGREGATO (regola dei gol in trasferta abolita, UEFA 2021):
+    se l'aggregato è pari dopo i 90' del ritorno -> supplementari
+    (λ ridotti a 1/3, cioè 30' su 90') e, se ancora pari, rigori (50/50).
     """
     rng = np.random.default_rng(seed)
     n = ris.n_iterazioni
+    and_c, and_f = andata
 
-    vince_c_90 = ris.gol_casa > ris.gol_fuori
-    vince_f_90 = ris.gol_casa < ris.gol_fuori
-    pari_90 = ris.gol_casa == ris.gol_fuori
+    # Punteggi aggregati (andata fissa + ritorno simulato)
+    agg_c = ris.gol_casa + and_c
+    agg_f = ris.gol_fuori + and_f
+
+    vince_c_90 = agg_c > agg_f
+    vince_f_90 = agg_c < agg_f
+    pari_90 = agg_c == agg_f
     n_pari = int(pari_90.sum())
 
     # Supplementari: 30 minuti -> λ/3
@@ -251,6 +257,109 @@ def risolvi_eliminazione(ris: RisultatiSimulazione, lam_casa: float,
 
 
 # ===========================================================================
+# DATABASE SQUADRE 2026/27 (verificato luglio 2026 — aggiornare ogni estate)
+# Per aggiungere/correggere una squadra basta modificare queste liste.
+# ===========================================================================
+
+SQUADRE = {
+    "Serie A": [
+        "Atalanta", "Bologna", "Cagliari", "Como", "Fiorentina", "Frosinone",
+        "Genoa", "Inter", "Juventus", "Lazio", "Lecce", "Milan", "Monza",
+        "Napoli", "Parma", "Roma", "Sassuolo", "Torino", "Udinese", "Venezia",
+    ],
+    "Premier League": [
+        "Arsenal", "Aston Villa", "Bournemouth", "Brentford", "Brighton",
+        "Chelsea", "Coventry City", "Crystal Palace", "Everton", "Fulham",
+        "Hull City", "Ipswich Town", "Leeds United", "Liverpool",
+        "Manchester City", "Manchester United", "Newcastle",
+        "Nottingham Forest", "Sunderland", "Tottenham",
+    ],
+    "Liga BBVA": [
+        "Alavés", "Athletic Club", "Atlético Madrid", "Barcellona", "Betis",
+        "Celta Vigo", "Deportivo La Coruña", "Elche", "Espanyol", "Getafe",
+        "Levante", "Málaga", "Osasuna", "Racing Santander", "Rayo Vallecano",
+        "Real Madrid", "Real Sociedad", "Siviglia", "Valencia", "Villarreal",
+    ],
+    "Bundesliga": [
+        "Augsburg", "Bayer Leverkusen", "Bayern Monaco", "Borussia Dortmund",
+        "Borussia M'gladbach", "Colonia", "Eintracht Francoforte",
+        "Elversberg", "Friburgo", "Amburgo", "Hoffenheim", "Lipsia",
+        "Mainz", "Paderborn", "Schalke 04", "Stoccarda", "Union Berlino",
+        "Werder Brema",
+    ],
+    "Ligue 1": [
+        "Angers", "Auxerre", "Brest", "Le Havre", "Le Mans", "Lens", "Lille",
+        "Lorient", "Lione", "Marsiglia", "Monaco", "Nizza", "Paris FC",
+        "PSG", "Rennes", "Strasburgo", "Tolosa", "Troyes",
+    ],
+    "Eredivisie": [
+        "ADO Den Haag", "Ajax", "AZ Alkmaar", "Cambuur", "Excelsior",
+        "Feyenoord", "Fortuna Sittard", "Go Ahead Eagles", "Groningen",
+        "Heerenveen", "NEC Nijmegen", "PEC Zwolle", "PSV", "Sparta Rotterdam",
+        "Telstar", "Twente", "Utrecht", "Willem II",
+    ],
+    "Nazionali": [
+        "Italia", "Spagna", "Francia", "Germania", "Inghilterra", "Olanda",
+        "Portogallo", "Belgio", "Croazia", "Danimarca", "Svizzera", "Austria",
+        "Polonia", "Serbia", "Turchia", "Ucraina", "Scozia", "Galles",
+        "Norvegia", "Svezia", "Grecia", "Repubblica Ceca", "Ungheria",
+        "Romania", "Slovenia", "Slovacchia", "Albania", "Georgia", "Irlanda",
+        "Argentina", "Brasile", "Uruguay", "Colombia", "Messico", "USA",
+        "Giappone", "Marocco",
+    ],
+}
+
+# Ogni competizione -> da quali liste pescare le squadre.
+# Le coppe nazionali includono anche club di serie minori: per quelli
+# c'è sempre la voce "Altra squadra" col campo libero.
+_TUTTI_I_CLUB = ["Serie A", "Premier League", "Liga BBVA", "Bundesliga",
+                 "Ligue 1", "Eredivisie"]
+COMPETIZIONI = {
+    "Serie A": ["Serie A"],
+    "Premier League": ["Premier League"],
+    "Liga BBVA": ["Liga BBVA"],
+    "Bundesliga": ["Bundesliga"],
+    "Ligue 1": ["Ligue 1"],
+    "Eredivisie": ["Eredivisie"],
+    "Champions League": _TUTTI_I_CLUB,
+    "Europa League": _TUTTI_I_CLUB,
+    "Conference League": _TUTTI_I_CLUB,
+    "Coppa Italia": ["Serie A"],
+    "Copa del Rey": ["Liga BBVA"],
+    "FA Cup": ["Premier League"],
+    "DFB Pokal": ["Bundesliga"],
+    "Coppa di Francia": ["Ligue 1"],
+    "KNVB Beker": ["Eredivisie"],
+    "UEFA Nations League": ["Nazionali"],
+    "Amichevole": _TUTTI_I_CLUB + ["Nazionali"],
+}
+
+ALTRA = "✏️ Altra squadra…"
+
+
+def opzioni_squadre(competizione: str) -> list:
+    """Elenco squadre per la competizione scelta + voce a inserimento libero."""
+    squadre = []
+    for lista in COMPETIZIONI.get(competizione, []):
+        squadre.extend(SQUADRE[lista])
+    return sorted(set(squadre)) + [ALTRA]
+
+
+def scegli_squadra(etichetta: str, competizione: str, chiave: str, default: int = 0):
+    """
+    Selectbox con ricerca integrata (digita per filtrare) + fallback a
+    campo libero per squadre non in elenco.
+    """
+    opzioni = opzioni_squadre(competizione)
+    scelta = st.selectbox(etichetta, opzioni, index=min(default, len(opzioni) - 1),
+                          key=f"sel_{chiave}")
+    if scelta == ALTRA:
+        return st.text_input(f"Nome squadra ({etichetta.lower()})",
+                             key=f"txt_{chiave}").strip() or "Squadra"
+    return scelta
+
+
+# ===========================================================================
 # INTERFACCIA STREAMLIT
 # ===========================================================================
 
@@ -259,13 +368,17 @@ st.title("⚽ Simulatore Predittivo di Partite")
 st.caption("Poisson calibrato sulle quote + Monte Carlo Gamma-Poisson "
            f"({N_SIMULAZIONI:,} iterazioni)".replace(",", "."))
 
+competizione = st.selectbox("Competizione", list(COMPETIZIONI.keys()))
+if competizione == "Amichevole":
+    st.caption("⚠️ Amichevole: turnover e motivazioni ballerine rendono "
+               "statistiche e forma meno affidabili. Valuta il campo neutro.")
+
 col_a, col_b = st.columns(2)
 with col_a:
-    competizione = st.text_input("Competizione", "Serie A")
-    casa = st.text_input("Squadra di casa", "Roma")
+    casa = scegli_squadra("Squadra di casa", competizione, "casa", default=0)
 with col_b:
     data_match = st.date_input("Data del match")
-    fuori = st.text_input("Squadra fuori casa", "Lazio")
+    fuori = scegli_squadra("Squadra fuori casa", competizione, "fuori", default=1)
 
 t1, t2 = st.columns(2)
 campo_neutro = t1.checkbox(
@@ -276,6 +389,22 @@ eliminazione = t2.checkbox(
     "⚔️ Eliminazione diretta",
     help="Se pareggio ai 90': simula supplementari (λ/3) e rigori (50/50) "
          "e calcola chi passa il turno.")
+
+# --- Doppio confronto: questa è la gara di RITORNO ---
+gol_andata_casa = gol_andata_fuori = 0
+ritorno = False
+if eliminazione:
+    ritorno = st.checkbox(
+        "🔁 Gara di ritorno di un doppio confronto",
+        help="Inserisci il risultato dell'andata: il passaggio del turno "
+             "verrà calcolato sul punteggio AGGREGATO (regola dei gol in "
+             "trasferta abolita dalla UEFA nel 2021).")
+    if ritorno:
+        r1, r2 = st.columns(2)
+        gol_andata_casa = r1.number_input(
+            f"Gol di {casa} all'andata", 0, 15, 0, key="and_c")
+        gol_andata_fuori = r2.number_input(
+            f"Gol di {fuori} all'andata", 0, 15, 0, key="and_f")
 
 st.subheader("Statistiche squadre")
 c1, c2 = st.columns(2)
@@ -343,8 +472,13 @@ if st.button("🎲 Simula la partita", type="primary"):
     ))
 
     if eliminazione:
-        st.subheader("⚔️ Passaggio del turno")
-        elim = risolvi_eliminazione(ris, lam_c, lam_f)
+        st.subheader("⚔️ Passaggio del turno"
+                     + (" (aggregato)" if ritorno else ""))
+        elim = risolvi_eliminazione(
+            ris, lam_c, lam_f, andata=(gol_andata_casa, gol_andata_fuori))
+        if ritorno:
+            st.caption(f"Andata: {casa} {gol_andata_casa} — "
+                       f"{gol_andata_fuori} {fuori}")
         e1, e2 = st.columns(2)
         e1.metric(f"Passa {casa}", f"{elim['passa_casa']:.1%}")
         e2.metric(f"Passa {fuori}", f"{elim['passa_fuori']:.1%}")
