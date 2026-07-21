@@ -333,7 +333,7 @@ SQUADRE = {
         # Grecia
         "PAOK", "AEK Atene", "Olympiacos", "Panathinaikos", "Aris Salonicco",
         # Repubblica Ceca & Slovacchia
-        "Sparta Praga", "Slavia Praga", "Viktoria Plzen", "Slovan Bratislava",
+        "Sparta Praga", "Slavia Praga", "Viktoria Plzen",
         # Ucraina & Polonia
         "Shakhtar Donetsk", "Dynamo Kiev", "Jagiellonia", "Slask Wroclaw", "Legia Varsavia",
         # Croazia, Serbia, Slovenia, Ungheria
@@ -392,6 +392,52 @@ COMPETIZIONI = {
 
 ALTRA = "✏️ Altra squadra…"
 ALTRA_COMP = "✏️ Altra competizione…"
+
+
+# ===========================================================================
+# RANKING CAMPIONATI
+# Corregge il 30% statistico quando le due squadre giocano in leghe di
+# livello diverso (coppe europee, amichevoli internazionali di club).
+# Applicato PRIMA della calibrazione sulle quote: niente doppio conteggio.
+# Valori ispirati al ranking UEFA, modificabili liberamente.
+# ===========================================================================
+RANKING_LEGHE = {
+    "Premier League": 1.00,
+    "Liga BBVA": 0.93,
+    "Serie A": 0.92,
+    "Bundesliga": 0.89,
+    "Ligue 1": 0.84,
+    "Liga Portugal": 0.78,
+    "Eredivisie": 0.77,
+    "Super Lig": 0.72,
+    "Scottish Premiership": 0.68,
+    "Qualificazioni / Altri Europei": 0.62,
+}
+ESPONENTE_RANKING = 0.6   # smorzamento: 0 = nessun effetto, 1 = effetto pieno
+
+
+def lega_di(squadra: str):
+    """Deduce il campionato di una squadra dalle liste in archivio."""
+    for lega, elenco in SQUADRE.items():
+        if lega in RANKING_LEGHE and squadra in elenco:
+            return lega
+    return None
+
+
+def applica_ranking_leghe(lam_c: float, lam_f: float, casa: str, fuori: str):
+    """
+    Se le due squadre giocano in leghe diverse, riscala i gol attesi in
+    base al rapporto di forza tra i campionati. Restituisce anche una
+    nota descrittiva (None = nessuna correzione applicata).
+    """
+    lega_c, lega_f = lega_di(casa), lega_di(fuori)
+    if not lega_c or not lega_f or lega_c == lega_f:
+        return lam_c, lam_f, None
+    rapporto = RANKING_LEGHE[lega_c] / RANKING_LEGHE[lega_f]
+    fatt = float(np.clip(rapporto ** ESPONENTE_RANKING, 0.60, 1.67))
+    nota = (f"⚖️ Ranking campionati: {lega_c} ({RANKING_LEGHE[lega_c]:.2f}) "
+            f"vs {lega_f} ({RANKING_LEGHE[lega_f]:.2f}) → correzione x{fatt:.2f}")
+    return lam_c * fatt, lam_f / fatt, nota
 
 
 def opzioni_squadre(competizione: str) -> list:
@@ -488,7 +534,7 @@ def tabella_calibrazione(df: pd.DataFrame) -> pd.DataFrame | None:
     """
     Il "test del meteorologo": raggruppa TUTTE le probabilità annunciate
     (1, X, 2, Over, GG) in fasce e confronta la media annunciata con la
-    frequenza réellement osservata. Se il modello è calibrato, le due
+    frequenza realmente osservata. Se il modello è calibrato, le due
     colonne si somigliano.
     """
     d = df.dropna(subset=["gol_casa_reale", "gol_fuori_reale"])
@@ -674,7 +720,7 @@ if competizione == "Amichevole":
 
 col_a, col_b = st.columns(2)
 with col_a:
-    casa = me_squadra = scegli_squadra("Squadra di casa", competizione, "casa", default=0)
+    casa = scegli_squadra("Squadra di casa", competizione, "casa", default=0)
 with col_b:
     data_match = st.date_input("Data del match")
     fuori = scegli_squadra("Squadra fuori casa", competizione, "fuori", default=1)
@@ -744,6 +790,8 @@ if st.button("🎲 Simula la partita", type="primary"):
     st_fuori = StatisticheSquadra(fuori, gf_f, gs_f, list(forma_f.upper())[-5:])
 
     lam_c, lam_f = lambdas_da_statistiche(st_casa, st_fuori, campo_neutro)
+    lam_c, lam_f, nota_lega = applica_ranking_leghe(lam_c, lam_f, casa, fuori)
+    st.session_state.nota_lega = nota_lega
     lam_c, lam_f = calibra_con_quote(lam_c, lam_f, quote)
     lam_c *= st_casa.punteggio_forma()
     lam_f *= st_fuori.punteggio_forma()
@@ -764,6 +812,8 @@ if u:
     nome_c, nome_f, quote_u = u["casa"], u["fuori"], u["quote"]
 
     st.metric("Gol attesi", f"{nome_c} {lam_c:.2f} — {lam_f:.2f} {nome_f}")
+    if st.session_state.get("nota_lega"):
+        st.caption(st.session_state.nota_lega)
 
     m1, m2, m3 = st.columns(3)
     m1.metric(f"1 · {nome_c}", f"{ris.p_1:.1%}")
