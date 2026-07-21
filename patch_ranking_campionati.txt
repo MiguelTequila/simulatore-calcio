@@ -1,0 +1,84 @@
+PATCH "RANKING CAMPIONATI" — 3 modifiche al tuo app_streamlit.py
+=================================================================
+Come sempre: matita su GitHub, cerca il testo indicato, modifica, commit.
+
+
+MODIFICA 1 — Aggiungi il blocco ranking
+----------------------------------------
+CERCA questa riga (c'è una volta sola):
+
+ALTRA_COMP = "✏️ Altra competizione…"
+
+e INCOLLA SUBITO SOTTO tutto questo:
+
+# ===========================================================================
+# RANKING CAMPIONATI
+# Corregge il 30% statistico quando le due squadre giocano in leghe di
+# livello diverso (coppe europee, amichevoli internazionali di club).
+# Applicato PRIMA della calibrazione sulle quote: niente doppio conteggio.
+# Valori ispirati al ranking UEFA, modificabili liberamente.
+# ===========================================================================
+RANKING_LEGHE = {
+    "Premier League": 1.00,
+    "Liga BBVA": 0.93,
+    "Serie A": 0.92,
+    "Bundesliga": 0.89,
+    "Ligue 1": 0.84,
+    "Liga Portugal": 0.78,
+    "Eredivisie": 0.77,
+    "Super Lig": 0.72,
+    "Scottish Premiership": 0.68,
+    "Qualificazioni / Altri Europei": 0.62,
+}
+ESPONENTE_RANKING = 0.6   # smorzamento: 0 = nessun effetto, 1 = effetto pieno
+
+
+def lega_di(squadra: str):
+    """Deduce il campionato di una squadra dalle liste in archivio."""
+    for lega, elenco in SQUADRE.items():
+        if lega in RANKING_LEGHE and squadra in elenco:
+            return lega
+    return None
+
+
+def applica_ranking_leghe(lam_c: float, lam_f: float, casa: str, fuori: str):
+    """
+    Se le due squadre giocano in leghe diverse, riscala i gol attesi in
+    base al rapporto di forza tra i campionati. Restituisce anche una
+    nota descrittiva (None = nessuna correzione applicata).
+    """
+    lega_c, lega_f = lega_di(casa), lega_di(fuori)
+    if not lega_c or not lega_f or lega_c == lega_f:
+        return lam_c, lam_f, None
+    rapporto = RANKING_LEGHE[lega_c] / RANKING_LEGHE[lega_f]
+    fatt = float(np.clip(rapporto ** ESPONENTE_RANKING, 0.60, 1.67))
+    nota = (f"⚖️ Ranking campionati: {lega_c} ({RANKING_LEGHE[lega_c]:.2f}) "
+            f"vs {lega_f} ({RANKING_LEGHE[lega_f]:.2f}) → correzione x{fatt:.2f}")
+    return lam_c * fatt, lam_f / fatt, nota
+
+
+MODIFICA 2 — Collega il ranking alla pipeline
+----------------------------------------------
+CERCA queste due righe (dentro il blocco "Simula la partita"):
+
+    lam_c, lam_f = lambdas_da_statistiche(st_casa, st_fuori, campo_neutro)
+    lam_c, lam_f = calibra_con_quote(lam_c, lam_f, quote)
+
+e SOSTITUISCILE con queste quattro:
+
+    lam_c, lam_f = lambdas_da_statistiche(st_casa, st_fuori, campo_neutro)
+    lam_c, lam_f, nota_lega = applica_ranking_leghe(lam_c, lam_f, casa, fuori)
+    st.session_state.nota_lega = nota_lega
+    lam_c, lam_f = calibra_con_quote(lam_c, lam_f, quote)
+
+
+MODIFICA 3 — Mostra la correzione a schermo
+--------------------------------------------
+CERCA questa riga (nella sezione output):
+
+    st.metric("Gol attesi", f"{nome_c} {lam_c:.2f} — {lam_f:.2f} {nome_f}")
+
+e AGGIUNGI SUBITO SOTTO queste due:
+
+    if st.session_state.get("nota_lega"):
+        st.caption(st.session_state.nota_lega)
