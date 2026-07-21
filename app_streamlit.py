@@ -348,6 +348,145 @@ COMPETIZIONI = {
 }
 
 ALTRA = "✏️ Altra squadra…"
+ALTRA_COMP = "✏️ Altra competizione…"
+
+
+def opzioni_squadre(competizione: str) -> list:
+    """
+    Elenco squadre per la competizione scelta + voce a inserimento libero.
+    Per una competizione non in elenco (inserita a mano) si mostra
+    l'unione di tutti i club e le nazionali in archivio.
+    """
+    liste = COMPETIZIONI.get(competizione)
+    if liste is None:
+        liste = _TUTTI_I_CLUB + ["Nazionali"]
+    squadre = []
+    for lista in liste:
+        squadre.extend(SQUADRE[lista])
+    return sorted(set(squadre)) + [ALTRA]
+
+
+# ===========================================================================
+# REGISTRO PREVISIONI E CALIBRAZIONE
+# ===========================================================================
+# Perché serve: una previsione azzeccata non prova nulla (il risultato
+# esatto più probabile esce ~1 volta su 8 anche con un modello perfetto).
+# L'unico giudizio onesto è cumulativo: su decine di partite, quando il
+# modello dice 60%, l'evento deve accadere circa 6 volte su 10.
+#
+# Il punteggio usato è il BRIER SCORE = media degli scarti al quadrato
+# tra probabilità annunciata ed esito reale (0 o 1). Più BASSO è, meglio
+# è. Riferimenti certi:
+#   - 1X2 (tre esiti): sparare 33% a caso vale 0.667
+#   - mercati binari (Over, GG): sparare 50% a caso vale 0.250
+# Il registro calcola il Brier del MODELLO e quello del MERCATO (dalle
+# quote) sulle stesse partite: è il confronto che dice se la componente
+# statistica aggiunge o toglie valore rispetto alle quote nude.
+
+COLONNE_REGISTRO = [
+    "data", "competizione", "casa", "fuori",
+    "p1", "px", "p2", "p_over25", "p_gg", "top_risultato",
+    "p1_mkt", "px_mkt", "p2_mkt", "p_over_mkt", "p_gg_mkt",
+    "gol_casa_reale", "gol_fuori_reale",
+]
+
+
+def registro_vuoto() -> pd.DataFrame:
+    """DataFrame vuoto con le colonne del registro."""
+    return pd.DataFrame(columns=COLONNE_REGISTRO)
+
+
+def _esiti_reali(gc: float, gf: float) -> dict:
+    """Converte un risultato reale negli esiti binari dei vari mercati."""
+    return {
+        "o1": 1.0 if gc > gf else 0.0,
+        "ox": 1.0 if gc == gf else 0.0,
+        "o2": 1.0 if gc < gf else 0.0,
+        "o_over": 1.0 if (gc + gf) >= 3 else 0.0,
+        "o_gg": 1.0 if (gc >= 1 and gf >= 1) else 0.0,
+    }
+
+
+def calcola_metriche(df: pd.DataFrame) -> dict | None:
+    """
+    Brier score di modello e mercato sulle partite con risultato
+    registrato. Restituisce None se non ce ne sono.
+    """
+    d = df.dropna(subset=["gol_casa_reale", "gol_fuori_reale"])
+    if d.empty:
+        return None
+
+    b_mod_1x2, b_mkt_1x2 = [], []
+    b_mod_over, b_mkt_over = [], []
+    b_mod_gg, b_mkt_gg = [], []
+    centri_top = 0
+
+    for _, r in d.iterrows():
+        gc, gf = float(r["gol_casa_reale"]), float(r["gol_fuori_reale"])
+        o = _esiti_reali(gc, gf)
+
+        b_mod_1x2.append((r["p1"] - o["o1"]) ** 2 + (r["px"] - o["ox"]) ** 2
+                         + (r["p2"] - o["o2"]) ** 2)
+        b_mod_over.append((r["p_over25"] - o["o_over"]) ** 2)
+        b_mod_gg.append((r["p_gg"] - o["o_gg"]) ** 2)
+
+        # Mercato: solo dove le quote erano state inserite
+        if pd.notna(r.get("p1_mkt")):
+            b_mkt_1x2.append((r["p1_mkt"] - o["o1"]) ** 2
+                             + (r["px_mkt"] - o["ox"]) ** 2
+                             + (r["p2_mkt"] - o["o2"]) ** 2)
+        if pd.notna(r.get("p_over_mkt")):
+            b_mkt_over.append((r["p_over_mkt"] - o["o_over"]) ** 2)
+        if pd.notna(r.get("p_gg_mkt")):
+            b_mkt_gg.append((r["p_gg_mkt"] - o["o_gg"]) ** 2)
+
+        if str(r.get("top_risultato", "")) == f"{int(gc)}-{int(gf)}":
+            centri_top += 1
+
+    med = lambda x: float(np.mean(x)) if x else None  # noqa: E731
+    return {
+        "n": len(d),
+        "brier_1x2": med(b_mod_1x2), "brier_1x2_mkt": med(b_mkt_1x2),
+        "brier_over": med(b_mod_over), "brier_over_mkt": med(b_mkt_over),
+        "brier_gg": med(b_mod_gg), "brier_gg_mkt": med(b_mkt_gg),
+        "centri_top": centri_top,
+        "perc_centri_top": centri_top / len(d),
+    }
+
+
+def tabella_calibrazione(df: pd.DataFrame) -> pd.DataFrame | None:
+    """
+    Il "test del meteorologo": raggruppa TUTTE le probabilità annunciate
+    (1, X, 2, Over, GG) in fasce e confronta la media annunciata con la
+    frequenza realmente osservata. Se il modello è calibrato, le due
+    colonne si somigliano.
+    """
+    d = df.dropna(subset=["gol_casa_reale", "gol_fuori_reale"])
+    if d.empty:
+        return None
+
+    coppie = []  # (probabilità annunciata, esito 0/1)
+    for _, r in d.iterrows():
+        gc, gf = float(r["gol_casa_reale"]), float(r["gol_fuori_reale"])
+        o = _esiti_reali(gc, gf)
+        coppie += [
+            (r["p1"], o["o1"]), (r["px"], o["ox"]), (r["p2"], o["o2"]),
+            (r["p_over25"], o["o_over"]), (r["p_gg"], o["o_gg"]),
+        ]
+
+    cp = pd.DataFrame(coppie, columns=["p", "esito"])
+    fasce = [0, 0.2, 0.4, 0.6, 0.8, 1.0]
+    etichette = ["0-20%", "20-40%", "40-60%", "60-80%", "80-100%"]
+    cp["fascia"] = pd.cut(cp["p"], bins=fasce, labels=etichette,
+                          include_lowest=True)
+    g = cp.groupby("fascia", observed=False).agg(
+        casi=("p", "size"), annunciata=("p", "mean"),
+        osservata=("esito", "mean"))
+    g = g[g["casi"] > 0].reset_index()
+    g["annunciata"] = (g["annunciata"] * 100).round(1)
+    g["osservata"] = (g["osservata"] * 100).round(1)
+    g.columns = ["Fascia", "Casi", "Annunciata %", "Osservata %"]
+    return g
 
 
 def media_inizio_stagione(scorsa: float, corrente: float, giornate: int,
@@ -374,14 +513,6 @@ def media_inizio_stagione(scorsa: float, corrente: float, giornate: int,
         base = 0.6 * scorsa + 0.4 * media_lega
     peso_corrente = min(max(giornate, 0) / 10.0, 1.0)
     return round(peso_corrente * corrente + (1 - peso_corrente) * base, 2)
-
-
-def opzioni_squadre(competizione: str) -> list:
-    """Elenco squadre per la competizione scelta + voce a inserimento libero."""
-    squadre = []
-    for lista in COMPETIZIONI.get(competizione, []):
-        squadre.extend(SQUADRE[lista])
-    return sorted(set(squadre)) + [ALTRA]
 
 
 def scegli_squadra(etichetta: str, competizione: str, chiave: str, default: int = 0):
@@ -413,7 +544,10 @@ st.caption("Poisson calibrato sulle quote + Monte Carlo Gamma-Poisson "
 with st.expander("📖 Istruzioni: come si usa"):
     st.markdown("""
 **1. Scegli la competizione** — la tendina delle squadre si adatta da sola.
-Squadra non in elenco (coppe nazionali, club minori)? Usa *✏️ Altra squadra*.
+Competizione non in elenco (campionati esteri, Serie B, Mondiali…)? Usa
+*✏️ Altra competizione* e scrivi il nome: le squadre mostrate diventano
+tutte quelle in archivio. Squadra comunque assente (coppe nazionali,
+club minori)? Usa *✏️ Altra squadra* e digitala a mano.
 
 **2. Inserisci le medie gol** (campi "Gol fatti/subiti a partita"):
 - **Dove trovarle:** *soccerstats.com* → campionato → tab *Home & Away
@@ -447,6 +581,16 @@ bookmaker in formato decimale.
 mercato. Il risultato esatto più probabile esce comunque ~1 volta su 8:
 un centro non prova che il modello è buono, un buco non prova che è
 rotto. Contano 30+ partite, non una.
+
+**7. Registro previsioni (in fondo alla pagina)** — è il quaderno che
+trasforma le sensazioni in misure:
+- dopo ogni simulazione premi *💾 Salva questa previsione*;
+- a partita giocata torna qui e registra il risultato reale;
+- **scarica sempre il CSV prima di chiudere la scheda** (l'app gira nel
+  browser: senza file scaricato le previsioni si perdono), e ricaricalo
+  la volta dopo per continuare ad accumulare;
+- da ~30 partite il *Brier score* dice quanto è affidabile il modello
+  (più basso = meglio) e — dato più importante — se batte le quote nude.
 """)
 
 # ---------------------------------------------------------------------------
@@ -492,7 +636,19 @@ with st.expander("🧮 Calcolatore inizio stagione (prime ~10 giornate)"):
         st.caption("Con 10+ giornate il calcolatore restituisce la "
                    "stagione corrente pura: puoi smettere di usarlo.")
 
-competizione = st.selectbox("Competizione", list(COMPETIZIONI.keys()))
+_scelta_comp = st.selectbox("Competizione",
+                            list(COMPETIZIONI.keys()) + [ALTRA_COMP])
+if _scelta_comp == ALTRA_COMP:
+    # Competizione libera: le squadre mostrate sono l'unione di tutto
+    competizione = st.text_input(
+        "Nome della competizione",
+        placeholder="es. Liga Portugal, Serie B, MLS, Mondiali…").strip()
+    competizione = competizione or "Altra competizione"
+    st.caption("Elenco squadre esteso a tutti i club e le nazionali in "
+               "archivio. Se la squadra non c'è, usa *✏️ Altra squadra*.")
+else:
+    competizione = _scelta_comp
+
 if competizione == "Amichevole":
     st.caption("⚠️ Amichevole: turnover e motivazioni ballerine rendono "
                "statistiche e forma meno affidabili. Valuta il campo neutro.")
@@ -575,20 +731,34 @@ if st.button("🎲 Simula la partita", type="primary"):
     lam_c *= st_casa.punteggio_forma()
     lam_f *= st_fuori.punteggio_forma()
 
-    ris = esegui_monte_carlo(lam_c, lam_f)
+    # I risultati vanno in sessione: così restano a schermo anche dopo
+    # aver premuto altri bottoni (es. il salvataggio nel registro).
+    st.session_state.ultima = {
+        "ris": esegui_monte_carlo(lam_c, lam_f),
+        "lam_c": lam_c, "lam_f": lam_f,
+        "casa": casa, "fuori": fuori, "competizione": competizione,
+        "data": str(data_match), "quote": quote,
+        "eliminazione": eliminazione, "ritorno": ritorno,
+        "andata": (gol_andata_casa, gol_andata_fuori),
+    }
+    st.session_state.salvata = False
 
-    st.metric("Gol attesi", f"{casa} {lam_c:.2f} — {lam_f:.2f} {fuori}")
+u = st.session_state.get("ultima")
+if u:
+    ris, lam_c, lam_f = u["ris"], u["lam_c"], u["lam_f"]
+    nome_c, nome_f, quote_u = u["casa"], u["fuori"], u["quote"]
+
+    st.metric("Gol attesi", f"{nome_c} {lam_c:.2f} — {lam_f:.2f} {nome_f}")
 
     m1, m2, m3 = st.columns(3)
-    m1.metric(f"1 · {casa}", f"{ris.p_1:.1%}")
+    m1.metric(f"1 · {nome_c}", f"{ris.p_1:.1%}")
     m2.metric("X · Pareggio", f"{ris.p_x:.1%}")
-    m3.metric(f"2 · {fuori}", f"{ris.p_2:.1%}")
+    m3.metric(f"2 · {nome_f}", f"{ris.p_2:.1%}")
 
     st.subheader("Top 3 risultati esatti")
-    st.table(pd.DataFrame(
-        [(s, f"{p:.1%}") for s, p in ris.top_risultati_esatti(3)],
-        columns=["Risultato", "Probabilità"],
-    ))
+    top3 = ris.top_risultati_esatti(3)
+    st.table(pd.DataFrame([(s, f"{p:.1%}") for s, p in top3],
+                          columns=["Risultato", "Probabilità"]))
 
     m4, m5, m6, m7 = st.columns(4)
     m4.metric("Over 2.5", f"{ris.p_over25:.1%}")
@@ -597,7 +767,7 @@ if st.button("🎲 Simula la partita", type="primary"):
     m7.metric("NoGoal (NG)", f"{ris.p_nogoal:.1%}")
 
     # --- Confronto diagnostico GG: modello vs mercato ---
-    gg_mercato = quote.probabilita_implicita_gg() if quote else None
+    gg_mercato = quote_u.probabilita_implicita_gg() if quote_u else None
     if gg_mercato is not None:
         delta = ris.p_goal - gg_mercato
         st.caption(f"🔍 GG — modello: {ris.p_goal:.1%} · mercato "
@@ -617,24 +787,168 @@ if st.button("🎲 Simula la partita", type="primary"):
         index=[f"{g}+" if g == max(dist) else str(g) for g in dist],
     ))
 
-    if eliminazione:
+    if u["eliminazione"]:
         st.subheader("⚔️ Passaggio del turno"
-                     + (" (aggregato)" if ritorno else ""))
-        elim = risolvi_eliminazione(
-            ris, lam_c, lam_f, andata=(gol_andata_casa, gol_andata_fuori))
-        if ritorno:
-            st.caption(f"Andata: {casa} {gol_andata_casa} — "
-                       f"{gol_andata_fuori} {fuori}")
+                     + (" (aggregato)" if u["ritorno"] else ""))
+        elim = risolvi_eliminazione(ris, lam_c, lam_f, andata=u["andata"])
+        if u["ritorno"]:
+            st.caption(f"Andata: {nome_c} {u['andata'][0]} — "
+                       f"{u['andata'][1]} {nome_f}")
         e1, e2 = st.columns(2)
-        e1.metric(f"Passa {casa}", f"{elim['passa_casa']:.1%}")
-        e2.metric(f"Passa {fuori}", f"{elim['passa_fuori']:.1%}")
+        e1.metric(f"Passa {nome_c}", f"{elim['passa_casa']:.1%}")
+        e2.metric(f"Passa {nome_f}", f"{elim['passa_fuori']:.1%}")
         st.caption(
             f"Pareggio ai 90': {elim['p_supplementari']:.1%} dei casi. "
-            f"Ripartizione {casa}: 90' {elim['casa_90']:.1%} · "
+            f"Ripartizione {nome_c}: 90' {elim['casa_90']:.1%} · "
             f"suppl. {elim['casa_sup']:.1%} · rigori {elim['casa_rig']:.1%}. "
-            f"{fuori}: 90' {elim['fuori_90']:.1%} · "
+            f"{nome_f}: 90' {elim['fuori_90']:.1%} · "
             f"suppl. {elim['fuori_sup']:.1%} · rigori {elim['fuori_rig']:.1%}."
         )
 
+    # --- Salvataggio nel registro ---
+    if st.session_state.get("salvata"):
+        st.success("✔️ Previsione salvata nel registro (in fondo alla pagina).")
+    elif st.button("💾 Salva questa previsione nel registro"):
+        p1m = pxm = p2m = pom = pgm = np.nan
+        if quote_u:
+            p1m, pxm, p2m = quote_u.probabilita_implicite_1x2()
+            pom = quote_u.probabilita_implicita_over25() or np.nan
+            pgm = quote_u.probabilita_implicita_gg() or np.nan
+        riga = {
+            "data": u["data"], "competizione": u["competizione"],
+            "casa": nome_c, "fuori": nome_f,
+            "p1": ris.p_1, "px": ris.p_x, "p2": ris.p_2,
+            "p_over25": ris.p_over25, "p_gg": ris.p_goal,
+            "top_risultato": top3[0][0],
+            "p1_mkt": p1m, "px_mkt": pxm, "p2_mkt": p2m,
+            "p_over_mkt": pom, "p_gg_mkt": pgm,
+            "gol_casa_reale": np.nan, "gol_fuori_reale": np.nan,
+        }
+        st.session_state.registro = pd.concat(
+            [st.session_state.get("registro", registro_vuoto()),
+             pd.DataFrame([riga])], ignore_index=True)
+        st.session_state.salvata = True
+        st.rerun()
+
     st.info("Probabilità descrittive del mercato, non consigli di scommessa. "
             "Un modello calibrato sulle quote non può batterle.")
+
+
+# ===========================================================================
+# SEZIONE REGISTRO PREVISIONI
+# ===========================================================================
+st.divider()
+st.subheader("📒 Registro previsioni")
+
+if "registro" not in st.session_state:
+    st.session_state.registro = registro_vuoto()
+
+st.warning(
+    "⚠️ L'app gira nel tuo browser: il registro vive solo in questa scheda. "
+    "**Scarica il CSV prima di chiudere**, e ricaricalo la volta dopo per "
+    "continuare ad accumulare partite.")
+
+# --- Ricarica di un archivio salvato ---
+caricato = st.file_uploader("Ricarica un registro salvato (.csv)", type="csv")
+if caricato is not None and not st.session_state.get("caricato_fatto"):
+    try:
+        df_in = pd.read_csv(caricato)
+        mancanti = [c for c in COLONNE_REGISTRO if c not in df_in.columns]
+        if mancanti:
+            st.error(f"CSV non valido, colonne mancanti: {', '.join(mancanti)}")
+        else:
+            st.session_state.registro = pd.concat(
+                [st.session_state.registro, df_in[COLONNE_REGISTRO]],
+                ignore_index=True).drop_duplicates(
+                    subset=["data", "casa", "fuori"], keep="last")
+            st.session_state.caricato_fatto = True
+            st.success(f"Caricate {len(df_in)} previsioni.")
+    except Exception as e:  # noqa: BLE001
+        st.error(f"Impossibile leggere il file: {e}")
+
+reg = st.session_state.registro
+
+if reg.empty:
+    st.caption("Nessuna previsione salvata. Simula una partita e premi "
+               "«💾 Salva questa previsione nel registro».")
+else:
+    # --- Inserimento dei risultati reali ---
+    da_completare = reg[reg["gol_casa_reale"].isna()]
+    if not da_completare.empty:
+        st.markdown("**Registra il risultato di una partita giocata**")
+        etichette = {
+            f"{r['data']} · {r['casa']} vs {r['fuori']}": i
+            for i, r in da_completare.iterrows()
+        }
+        scelta = st.selectbox("Partita in attesa di risultato",
+                              list(etichette.keys()))
+        g1, g2, g3 = st.columns([2, 2, 3])
+        gc_reale = g1.number_input("Gol casa", 0, 20, 0, key="res_c")
+        gf_reale = g2.number_input("Gol fuori", 0, 20, 0, key="res_f")
+        if g3.button("✅ Registra risultato"):
+            idx = etichette[scelta]
+            st.session_state.registro.loc[idx, "gol_casa_reale"] = gc_reale
+            st.session_state.registro.loc[idx, "gol_fuori_reale"] = gf_reale
+            st.rerun()
+
+    # --- Tabella e download ---
+    vista = reg.copy()
+    for col in ["p1", "px", "p2", "p_over25", "p_gg"]:
+        vista[col] = (vista[col].astype(float) * 100).round(1)
+    st.dataframe(
+        vista[["data", "casa", "fuori", "p1", "px", "p2", "p_over25",
+               "p_gg", "top_risultato", "gol_casa_reale", "gol_fuori_reale"]],
+        use_container_width=True, hide_index=True)
+
+    st.download_button(
+        "⬇️ Scarica il registro (.csv)",
+        data=reg.to_csv(index=False).encode("utf-8"),
+        file_name="registro_previsioni.csv", mime="text/csv")
+
+    # --- Metriche di calibrazione ---
+    met = calcola_metriche(reg)
+    if met is None:
+        st.caption("Nessun risultato registrato ancora: le metriche "
+                   "compaiono appena inserisci il primo.")
+    else:
+        st.markdown("---")
+        st.markdown(f"**Punteggio su {met['n']} partite concluse**")
+        if met["n"] < 30:
+            st.caption(f"⚠️ Solo {met['n']} partite: i numeri qui sotto sono "
+                       "ancora rumore. Servono almeno 30 partite per una "
+                       "lettura indicativa, 50+ per fidarsi.")
+
+        st.caption("Brier score: più BASSO è, meglio è. Riferimenti: "
+                   "sparare a caso vale 0.667 sull'1X2 e 0.250 sui mercati "
+                   "binari (Over, GG).")
+        b1, b2, b3 = st.columns(3)
+        b1.metric("Brier 1X2", f"{met['brier_1x2']:.3f}",
+                  delta=(None if met["brier_1x2_mkt"] is None else
+                         f"{met['brier_1x2'] - met['brier_1x2_mkt']:+.3f} vs "
+                         "mercato"), delta_color="inverse")
+        b2.metric("Brier Over 2.5", f"{met['brier_over']:.3f}",
+                  delta=(None if met["brier_over_mkt"] is None else
+                         f"{met['brier_over'] - met['brier_over_mkt']:+.3f} vs "
+                         "mercato"), delta_color="inverse")
+        b3.metric("Brier GG", f"{met['brier_gg']:.3f}",
+                  delta=(None if met["brier_gg_mkt"] is None else
+                         f"{met['brier_gg'] - met['brier_gg_mkt']:+.3f} vs "
+                         "mercato"), delta_color="inverse")
+        st.caption(
+            "Il confronto «vs mercato» è il verdetto vero: valore NEGATIVO "
+            "(verde) = il modello batte le quote nude su quelle partite; "
+            "POSITIVO (rosso) = le quote da sole facevano meglio, e la "
+            "componente statistica sta togliendo invece di aggiungere.")
+
+        st.caption(f"Risultato esatto più probabile azzeccato "
+                   f"{met['centri_top']} volte su {met['n']} "
+                   f"({met['perc_centri_top']:.0%}). Riferimento: un modello "
+                   "sano ci prende attorno al 10-13%.")
+
+        tab = tabella_calibrazione(reg)
+        if tab is not None:
+            st.markdown("**Test del meteorologo (calibrazione)**")
+            st.caption("Quando il modello annuncia una certa probabilità, "
+                       "l'evento accade davvero con quella frequenza? Le due "
+                       "colonne devono somigliarsi.")
+            st.dataframe(tab, use_container_width=True, hide_index=True)
