@@ -270,8 +270,7 @@ def risolvi_eliminazione(ris: RisultatiSimulazione, lam_casa: float,
 
 
 # ===========================================================================
-# DATABASE SQUADRE 2026/27 (verificato luglio 2026 — aggiornare ogni estate)
-# Per aggiungere/correggere una squadra basta modificare queste liste.
+# DATABASE SQUADRE 2026/27 (inclusi i preliminari Champions/Europa/Conference)
 # ===========================================================================
 
 SQUADRE = {
@@ -311,6 +310,48 @@ SQUADRE = {
         "Heerenveen", "NEC Nijmegen", "PEC Zwolle", "PSV", "Sparta Rotterdam",
         "Telstar", "Twente", "Utrecht", "Willem II",
     ],
+    "Liga Portugal": [
+        "Arouca", "AVS", "Benfica", "Boavista", "Braga", "Casa Pia", "Estoril",
+        "Estrela Amadora", "Famalicao", "FC Porto", "Farense", "Gil Vicente",
+        "Guimarães", "Moreirense", "Nacional", "Rio Ave", "Santa Clara",
+        "Sporting CP",
+    ],
+    "Super Lig": [
+        "Besiktas", "Fenerbahce", "Galatasaray", "Trabzonspor", "Basaksehir",
+        "Kasimpasa", "Sivasspor", "Adana Demirspor",
+    ],
+    "Scottish Premiership": [
+        "Celtic", "Rangers", "Hearts", "Kilmarnock", "St. Mirren", "Aberdeen",
+    ],
+    "Qualificazioni / Altri Europei": [
+        # Svizzera
+        "Young Boys", "Lugano", "Servette", "Basilea", "Zurigo",
+        # Belgio
+        "Club Brugge", "Union SG", "Anderlecht", "Gent", "Genk", "Cercle Brugge",
+        # Austria
+        "Salisburgo", "Sturm Graz", "LASK", "Rapid Vienna", "Austria Vienna",
+        # Grecia
+        "PAOK", "AEK Atene", "Olympiacos", "Panathinaikos", "Aris Salonicco",
+        # Repubblica Ceca & Slovacchia
+        "Sparta Praga", "Slavia Praga", "Viktoria Plzen", "Slovan Bratislava",
+        # Ucraina & Polonia
+        "Shakhtar Donetsk", "Dynamo Kiev", "Jagiellonia", "Slask Wroclaw", "Legia Varsavia",
+        # Croazia, Serbia, Slovenia, Ungheria
+        "Dinamo Zagabria", "Rijeka", "Hajduk Spalato", "Stella Rossa", "Partizan",
+        "TSC Backa Topola", "NK Celje", "Maribor", "Ferencvaros", "Paks",
+        # Danimarca, Norvegia, Svezia
+        "FC Copenaghen", "Midtjylland", "Brøndby", "Nordsjælland", "Bodo/Glimt",
+        "Molde", "Brann", "Malmö FF", "Elfsborg", "BK Häcken",
+        # Cipro, Israele, Romania, Bulgaria
+        "APOEL Nicosia", "Paphos", "Maccabi Tel Aviv", "Maccabi Haifa", "FCSB",
+        "CFR Cluj", "Ludogorets", "CSKA Sofia",
+        # Altre leghe minori / Preliminari UEFA
+        "Slovan Bratislava", "Qarabag", "KÍ Klaksvík", "Flora Tallinn",
+        "RFS Riga", "Panevezys", "Zalgiris", "Ordabasy", "Pyunik", "Petrocub",
+        "Dinamo Minsk", "Lincoln Red Imps", "The New Saints", "Ballkani",
+        "Egnatia", "Hamrun Spartans", "Differdange", "Vikingur Reykjavik",
+        "Larne", "Decic", "FC Santa Coloma", "Virtus",
+    ],
     "Nazionali": [
         "Italia", "Spagna", "Francia", "Germania", "Inghilterra", "Olanda",
         "Portogallo", "Belgio", "Croazia", "Danimarca", "Svizzera", "Austria",
@@ -323,10 +364,10 @@ SQUADRE = {
 }
 
 # Ogni competizione -> da quali liste pescare le squadre.
-# Le coppe nazionali includono anche club di serie minori: per quelli
-# c'è sempre la voce "Altra squadra" col campo libero.
 _TUTTI_I_CLUB = ["Serie A", "Premier League", "Liga BBVA", "Bundesliga",
-                 "Ligue 1", "Eredivisie"]
+                 "Ligue 1", "Eredivisie", "Liga Portugal", "Super Lig",
+                 "Scottish Premiership", "Qualificazioni / Altri Europei"]
+
 COMPETIZIONI = {
     "Serie A": ["Serie A"],
     "Premier League": ["Premier League"],
@@ -334,6 +375,7 @@ COMPETIZIONI = {
     "Bundesliga": ["Bundesliga"],
     "Ligue 1": ["Ligue 1"],
     "Eredivisie": ["Eredivisie"],
+    "Liga Portugal": ["Liga Portugal"],
     "Champions League": _TUTTI_I_CLUB,
     "Europa League": _TUTTI_I_CLUB,
     "Conference League": _TUTTI_I_CLUB,
@@ -343,6 +385,7 @@ COMPETIZIONI = {
     "DFB Pokal": ["Bundesliga"],
     "Coppa di Francia": ["Ligue 1"],
     "KNVB Beker": ["Eredivisie"],
+    "Taça de Portugal": ["Liga Portugal"],
     "UEFA Nations League": ["Nazionali"],
     "Amichevole": _TUTTI_I_CLUB + ["Nazionali"],
 }
@@ -369,19 +412,6 @@ def opzioni_squadre(competizione: str) -> list:
 # ===========================================================================
 # REGISTRO PREVISIONI E CALIBRAZIONE
 # ===========================================================================
-# Perché serve: una previsione azzeccata non prova nulla (il risultato
-# esatto più probabile esce ~1 volta su 8 anche con un modello perfetto).
-# L'unico giudizio onesto è cumulativo: su decine di partite, quando il
-# modello dice 60%, l'evento deve accadere circa 6 volte su 10.
-#
-# Il punteggio usato è il BRIER SCORE = media degli scarti al quadrato
-# tra probabilità annunciata ed esito reale (0 o 1). Più BASSO è, meglio
-# è. Riferimenti certi:
-#   - 1X2 (tre esiti): sparare 33% a caso vale 0.667
-#   - mercati binari (Over, GG): sparare 50% a caso vale 0.250
-# Il registro calcola il Brier del MODELLO e quello del MERCATO (dalle
-# quote) sulle stesse partite: è il confronto che dice se la componente
-# statistica aggiunge o toglie valore rispetto alle quote nude.
 
 COLONNE_REGISTRO = [
     "data", "competizione", "casa", "fuori",
@@ -458,7 +488,7 @@ def tabella_calibrazione(df: pd.DataFrame) -> pd.DataFrame | None:
     """
     Il "test del meteorologo": raggruppa TUTTE le probabilità annunciate
     (1, X, 2, Over, GG) in fasce e confronta la media annunciata con la
-    frequenza realmente osservata. Se il modello è calibrato, le due
+    frequenza réellement osservata. Se il modello è calibrato, le due
     colonne si somigliano.
     """
     d = df.dropna(subset=["gol_casa_reale", "gol_fuori_reale"])
@@ -495,17 +525,6 @@ def media_inizio_stagione(scorsa: float, corrente: float, giornate: int,
     """
     Media gol da usare a inizio stagione, quando le partite giocate
     sono poche e la media corrente è ancora rumore.
-
-    Logica:
-      - Base = stagione scorsa "tirata" verso la media di lega
-        (0.6 x scorsa + 0.4 x 1.35), perché mercato e cambi allenatore
-        erodono le prestazioni passate.
-      - Per le NEOPROMOSSE la stagione scorsa (categoria inferiore) non
-        vale nulla: base = profilo storico della neopromossa tipo
-        (~1.0 gol fatti, ~1.6 subiti).
-      - Il peso della stagione corrente cresce linearmente con le
-        giornate giocate: 0 giornate = solo base, 10+ giornate = solo
-        stagione corrente.
     """
     if neopromossa:
         base = 1.6 if gol_subiti else 1.0
@@ -642,7 +661,7 @@ if _scelta_comp == ALTRA_COMP:
     # Competizione libera: le squadre mostrate sono l'unione di tutto
     competizione = st.text_input(
         "Nome della competizione",
-        placeholder="es. Liga Portugal, Serie B, MLS, Mondiali…").strip()
+        placeholder="es. Serie B, MLS, Mondiali…").strip()
     competizione = competizione or "Altra competizione"
     st.caption("Elenco squadre esteso a tutti i club e le nazionali in "
                "archivio. Se la squadra non c'è, usa *✏️ Altra squadra*.")
@@ -655,7 +674,7 @@ if competizione == "Amichevole":
 
 col_a, col_b = st.columns(2)
 with col_a:
-    casa = scegli_squadra("Squadra di casa", competizione, "casa", default=0)
+    casa = me_squadra = scegli_squadra("Squadra di casa", competizione, "casa", default=0)
 with col_b:
     data_match = st.date_input("Data del match")
     fuori = scegli_squadra("Squadra fuori casa", competizione, "fuori", default=1)
@@ -721,18 +740,14 @@ if usa_quote:
                        quota_g, quota_n)
 
 if st.button("🎲 Simula la partita", type="primary"):
-    # [-5:] = solo le ultime 5 lettere della forma, anche se ne scrivi di più
     st_casa = StatisticheSquadra(casa, gf_c, gs_c, list(forma_c.upper())[-5:])
     st_fuori = StatisticheSquadra(fuori, gf_f, gs_f, list(forma_f.upper())[-5:])
 
-    # Pipeline: λ statistici -> calibrazione quote -> correzione forma
     lam_c, lam_f = lambdas_da_statistiche(st_casa, st_fuori, campo_neutro)
     lam_c, lam_f = calibra_con_quote(lam_c, lam_f, quote)
     lam_c *= st_casa.punteggio_forma()
     lam_f *= st_fuori.punteggio_forma()
 
-    # I risultati vanno in sessione: così restano a schermo anche dopo
-    # aver premuto altri bottoni (es. il salvataggio nel registro).
     st.session_state.ultima = {
         "ris": esegui_monte_carlo(lam_c, lam_f),
         "lam_c": lam_c, "lam_f": lam_f,
@@ -766,7 +781,6 @@ if u:
     m6.metric("Goal (GG)", f"{ris.p_goal:.1%}")
     m7.metric("NoGoal (NG)", f"{ris.p_nogoal:.1%}")
 
-    # --- Confronto diagnostico GG: modello vs mercato ---
     gg_mercato = quote_u.probabilita_implicita_gg() if quote_u else None
     if gg_mercato is not None:
         delta = ris.p_goal - gg_mercato
@@ -805,7 +819,6 @@ if u:
             f"suppl. {elim['fuori_sup']:.1%} · rigori {elim['fuori_rig']:.1%}."
         )
 
-    # --- Salvataggio nel registro ---
     if st.session_state.get("salvata"):
         st.success("✔️ Previsione salvata nel registro (in fondo alla pagina).")
     elif st.button("💾 Salva questa previsione nel registro"):
@@ -848,7 +861,6 @@ st.warning(
     "**Scarica il CSV prima di chiudere**, e ricaricalo la volta dopo per "
     "continuare ad accumulare partite.")
 
-# --- Ricarica di un archivio salvato ---
 caricato = st.file_uploader("Ricarica un registro salvato (.csv)", type="csv")
 if caricato is not None and not st.session_state.get("caricato_fatto"):
     try:
@@ -872,7 +884,6 @@ if reg.empty:
     st.caption("Nessuna previsione salvata. Simula una partita e premi "
                "«💾 Salva questa previsione nel registro».")
 else:
-    # --- Inserimento dei risultati reali ---
     da_completare = reg[reg["gol_casa_reale"].isna()]
     if not da_completare.empty:
         st.markdown("**Registra il risultato di una partita giocata**")
@@ -891,7 +902,6 @@ else:
             st.session_state.registro.loc[idx, "gol_fuori_reale"] = gf_reale
             st.rerun()
 
-    # --- Tabella e download ---
     vista = reg.copy()
     for col in ["p1", "px", "p2", "p_over25", "p_gg"]:
         vista[col] = (vista[col].astype(float) * 100).round(1)
@@ -905,7 +915,6 @@ else:
         data=reg.to_csv(index=False).encode("utf-8"),
         file_name="registro_previsioni.csv", mime="text/csv")
 
-    # --- Metriche di calibrazione ---
     met = calcola_metriche(reg)
     if met is None:
         st.caption("Nessun risultato registrato ancora: le metriche "
