@@ -1074,6 +1074,28 @@ else:
         data=reg.to_csv(index=False).encode("utf-8"),
         file_name="registro_previsioni.csv", mime="text/csv")
 
+    # --- Cancellazione manuale di una riga (doppioni, errori, rinvii) ---
+    with st.expander("🗑️ Elimina una partita dal registro"):
+        st.caption("Utile per doppioni caricati per errore, previsioni "
+                   "sbagliate o partite rinviate. Ricorda di riscaricare il "
+                   "CSV dopo, altrimenti la modifica vive solo in questa scheda.")
+        etich_del = {
+            f"[{i}] {r['data']} · {r['casa']} vs {r['fuori']}": i
+            for i, r in reg.iterrows()
+        }
+        da_elim = st.selectbox("Partita da eliminare", list(etich_del.keys()),
+                               key="del_sel")
+        conferma = st.checkbox("Confermo: elimina questa riga", key="del_ok")
+        if st.button("🗑️ Elimina definitivamente", key="del_btn"):
+            if conferma:
+                idx = etich_del[da_elim]
+                st.session_state.registro = reg.drop(index=idx).reset_index(
+                    drop=True)
+                st.success("Riga eliminata. Riscarica il CSV per salvare.")
+                st.rerun()
+            else:
+                st.warning("Spunta prima la casella di conferma.")
+
     met = calcola_metriche(reg)
     if met is None:
         st.caption("Nessun risultato registrato ancora: le metriche "
