@@ -9,6 +9,7 @@ file, senza dipendenze dal pacchetto src/. Pensato per girare sia con
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
@@ -323,6 +324,43 @@ SQUADRE = {
     "Scottish Premiership": [
         "Celtic", "Rangers", "Hearts", "Kilmarnock", "St. Mirren", "Aberdeen",
     ],
+    "Eliteserien (NOR)": [
+        "Bodo/Glimt", "Molde", "Brann", "Rosenborg", "Viking", "Lillestrøm",
+        "Vålerenga", "Tromsø", "Fredrikstad", "Sarpsborg 08",
+    ],
+    "Chance Liga (CZE)": [
+        "Sparta Praga", "Slavia Praga", "Viktoria Plzen", "Banik Ostrava",
+        "Slovacko", "Jablonec", "Mlada Boleslav", "Sigma Olomouc",
+        "Hradec Kralove",
+    ],
+    "SuperLiga (ROU)": [
+        "FCSB", "CFR Cluj", "Universitatea Craiova", "Rapid Bucarest",
+        "Dinamo Bucarest", "Farul Constanta", "Petrolul", "Otelul",
+        "U Cluj", "Hermannstadt",
+    ],
+    "HNL (CRO)": [
+        "Dinamo Zagabria", "Hajduk Spalato", "Rijeka", "Osijek",
+        "Lokomotiva Zagabria", "Gorica", "Istra 1961", "Slaven Belupo",
+        "Varazdin", "Sibenik",
+    ],
+    "SuperLiga (SRB)": [
+        "Stella Rossa", "Partizan", "TSC Backa Topola", "Vojvodina",
+        "Cukaricki", "Radnicki Nis", "Novi Pazar", "Mladost Lucani",
+    ],
+    "LOI Premier (IRL)": [
+        "Shamrock Rovers", "Shelbourne", "Derry City", "St Patrick's",
+        "Bohemians", "Sligo Rovers", "Drogheda", "Cork City",
+        "Galway United", "Waterford",
+    ],
+    "Veikkausliiga (FIN)": [
+        "HJK Helsinki", "KuPS", "Inter Turku", "Ilves", "SJK Seinajoki",
+        "Haka", "VPS Vaasa", "IFK Mariehamn", "AC Oulu", "Lahti",
+    ],
+    "Ekstraklasa (POL)": [
+        "Legia Varsavia", "Lech Poznan", "Rakow", "Jagiellonia",
+        "Pogon Szczecin", "Gornik Zabrze", "Slask Wroclaw", "Cracovia",
+        "Widzew Lodz", "Piast Gliwice", "Motor Lublin",
+    ],
     "Qualificazioni / Altri Europei": [
         # Svizzera
         "Young Boys", "Lugano", "Servette", "Basilea", "Zurigo",
@@ -333,18 +371,16 @@ SQUADRE = {
         # Grecia
         "PAOK", "AEK Atene", "Olympiacos", "Panathinaikos", "Aris Salonicco",
         # Repubblica Ceca & Slovacchia
-        "Sparta Praga", "Slavia Praga", "Viktoria Plzen",
         # Ucraina & Polonia
-        "Shakhtar Donetsk", "Dynamo Kiev", "Jagiellonia", "Slask Wroclaw", "Legia Varsavia",
+        "Shakhtar Donetsk", "Dynamo Kiev",
         # Croazia, Serbia, Slovenia, Ungheria
-        "Dinamo Zagabria", "Rijeka", "Hajduk Spalato", "Stella Rossa", "Partizan",
-        "TSC Backa Topola", "NK Celje", "Maribor", "Ferencvaros", "Paks",
+        "NK Celje", "Maribor", "Ferencvaros", "Paks",
         # Danimarca, Norvegia, Svezia
-        "FC Copenaghen", "Midtjylland", "Brøndby", "Nordsjælland", "Bodo/Glimt",
-        "Molde", "Brann", "Malmö FF", "Elfsborg", "BK Häcken",
+        "FC Copenaghen", "Midtjylland", "Brøndby", "Nordsjælland",
+        "Malmö FF", "Elfsborg", "BK Häcken",
         # Cipro, Israele, Romania, Bulgaria
-        "APOEL Nicosia", "Paphos", "Maccabi Tel Aviv", "Maccabi Haifa", "FCSB",
-        "CFR Cluj", "Ludogorets", "CSKA Sofia",
+        "APOEL Nicosia", "Paphos", "Maccabi Tel Aviv", "Maccabi Haifa",
+        "Ludogorets", "CSKA Sofia",
         # Altre leghe minori / Preliminari UEFA
         "Slovan Bratislava", "Qarabag", "KÍ Klaksvík", "Flora Tallinn",
         "RFS Riga", "Panevezys", "Zalgiris", "Ordabasy", "Pyunik", "Petrocub",
@@ -366,7 +402,11 @@ SQUADRE = {
 # Ogni competizione -> da quali liste pescare le squadre.
 _TUTTI_I_CLUB = ["Serie A", "Premier League", "Liga BBVA", "Bundesliga",
                  "Ligue 1", "Eredivisie", "Liga Portugal", "Super Lig",
-                 "Scottish Premiership", "Qualificazioni / Altri Europei"]
+                 "Scottish Premiership", "Eliteserien (NOR)",
+                 "Chance Liga (CZE)", "SuperLiga (ROU)", "HNL (CRO)",
+                 "SuperLiga (SRB)", "LOI Premier (IRL)",
+                 "Veikkausliiga (FIN)", "Ekstraklasa (POL)",
+                 "Qualificazioni / Altri Europei"]
 
 COMPETIZIONI = {
     "Serie A": ["Serie A"],
@@ -409,9 +449,17 @@ RANKING_LEGHE = {
     "Ligue 1": 0.84,
     "Liga Portugal": 0.78,
     "Eredivisie": 0.77,
-    "Super Lig": 0.72,
     "Scottish Premiership": 0.68,
+    "Super Lig": 0.72,
+    "Chance Liga (CZE)": 0.70,
+    "Eliteserien (NOR)": 0.68,
+    "Ekstraklasa (POL)": 0.66,
+    "SuperLiga (ROU)": 0.64,
+    "HNL (CRO)": 0.64,
+    "SuperLiga (SRB)": 0.63,
     "Qualificazioni / Altri Europei": 0.62,
+    "Veikkausliiga (FIN)": 0.55,
+    "LOI Premier (IRL)": 0.54,
 }
 ESPONENTE_RANKING = 0.6   # smorzamento: 0 = nessun effetto, 1 = effetto pieno
 
@@ -452,7 +500,10 @@ def opzioni_squadre(competizione: str) -> list:
     squadre = []
     for lista in liste:
         squadre.extend(SQUADRE[lista])
-    return sorted(set(squadre)) + [ALTRA]
+    squadre = sorted(set(squadre))
+    # "Altra squadra" in seconda posizione: subito a portata di mano,
+    # ma la prima voce resta una squadra vera (default sensato)
+    return squadre[:1] + [ALTRA] + squadre[1:]
 
 
 # ===========================================================================
@@ -467,6 +518,9 @@ COLONNE_REGISTRO = [
     "q1", "qx", "q2", "q_over", "q_under", "q_gg", "q_ng",
     # Backtesting: segnale monitorato + EV congelato al momento della previsione
     "segnale_test", "ev_segnale", "quota_segnale",
+    # Timestamp automatici: quando la previsione e' stata salvata e
+    # quando e' stato inserito il risultato reale
+    "salvata_il", "risultato_il",
     "gol_casa_reale", "gol_fuori_reale",
 ]
 
@@ -730,8 +784,9 @@ with st.expander("🧮 Calcolatore inizio stagione (prime ~10 giornate)"):
         st.caption("Con 10+ giornate il calcolatore restituisce la "
                    "stagione corrente pura: puoi smettere di usarlo.")
 
-_scelta_comp = st.selectbox("Competizione",
-                            list(COMPETIZIONI.keys()) + [ALTRA_COMP])
+_comp_opzioni = list(COMPETIZIONI.keys())
+_comp_opzioni = _comp_opzioni[:1] + [ALTRA_COMP] + _comp_opzioni[1:]
+_scelta_comp = st.selectbox("Competizione", _comp_opzioni)
 if _scelta_comp == ALTRA_COMP:
     # Competizione libera: le squadre mostrate sono l'unione di tutto
     competizione = st.text_input(
@@ -752,7 +807,7 @@ with col_a:
     casa = scegli_squadra("Squadra di casa", competizione, "casa", default=0)
 with col_b:
     data_match = st.date_input("Data del match")
-    fuori = scegli_squadra("Squadra fuori casa", competizione, "fuori", default=1)
+    fuori = scegli_squadra("Squadra fuori casa", competizione, "fuori", default=2)
 
 t1, t2 = st.columns(2)
 campo_neutro = t1.checkbox(
@@ -986,6 +1041,8 @@ if u:
             "segnale_test": u.get("segnale", "—"),
             "ev_segnale": u.get("ev_seg", np.nan),
             "quota_segnale": u.get("q_seg", np.nan),
+            "salvata_il": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "risultato_il": np.nan,
             "gol_casa_reale": np.nan, "gol_fuori_reale": np.nan,
         }
         st.session_state.registro = pd.concat(
@@ -1059,15 +1116,22 @@ else:
             idx = etichette[scelta]
             st.session_state.registro.loc[idx, "gol_casa_reale"] = gc_reale
             st.session_state.registro.loc[idx, "gol_fuori_reale"] = gf_reale
+            st.session_state.registro.loc[idx, "risultato_il"] = \
+                datetime.now().strftime("%Y-%m-%d %H:%M")
             st.rerun()
 
     vista = reg.copy()
     for col in ["p1", "px", "p2", "p_over25", "p_gg"]:
         vista[col] = (vista[col].astype(float) * 100).round(1)
-    st.dataframe(
-        vista[["data", "casa", "fuori", "p1", "px", "p2", "p_over25",
-               "p_gg", "top_risultato", "gol_casa_reale", "gol_fuori_reale"]],
-        use_container_width=True, hide_index=True)
+    # Le quote grezze compaiono solo se presenti (registri vecchi non le hanno)
+    col_tab = ["data", "casa", "fuori", "p1", "px", "p2", "p_over25",
+               "p_gg", "top_risultato"]
+    if "q1" in vista.columns and vista["q1"].notna().any():
+        col_tab += ["q1", "qx", "q2"]
+    if "salvata_il" in vista.columns and vista["salvata_il"].notna().any():
+        col_tab += ["salvata_il"]
+    col_tab += ["gol_casa_reale", "gol_fuori_reale"]
+    st.dataframe(vista[col_tab], use_container_width=True, hide_index=True)
 
     st.download_button(
         "⬇️ Scarica il registro (.csv)",
