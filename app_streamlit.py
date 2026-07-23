@@ -1120,6 +1120,37 @@ else:
                 datetime.now().strftime("%Y-%m-%d %H:%M")
             st.rerun()
 
+    # --- Correzione di un risultato gia' inserito ---
+    gia_inserite = reg[reg["gol_casa_reale"].notna()]
+    if not gia_inserite.empty:
+        with st.expander("✏️ Correggi un risultato già inserito"):
+            st.caption("Per errori di inserimento (punteggio invertito, "
+                       "partita sbagliata). La correzione aggiorna anche il "
+                       "timestamp. Riscarica il CSV dopo, come sempre.")
+            etich_fix = {
+                (f"{r['data']} · {r['casa']} "
+                 f"{int(r['gol_casa_reale'])}-{int(r['gol_fuori_reale'])} "
+                 f"{r['fuori']}"): i
+                for i, r in gia_inserite.iterrows()
+            }
+            scelta_fix = st.selectbox("Partita da correggere",
+                                      list(etich_fix.keys()), key="fix_sel")
+            idx_fix = etich_fix[scelta_fix]
+            f1, f2, f3 = st.columns([2, 2, 3])
+            gc_fix = f1.number_input(
+                "Gol casa corretti", 0, 20,
+                int(reg.loc[idx_fix, "gol_casa_reale"]), key="fix_c")
+            gf_fix = f2.number_input(
+                "Gol fuori corretti", 0, 20,
+                int(reg.loc[idx_fix, "gol_fuori_reale"]), key="fix_f")
+            if f3.button("✏️ Applica correzione", key="fix_btn"):
+                st.session_state.registro.loc[idx_fix, "gol_casa_reale"] = gc_fix
+                st.session_state.registro.loc[idx_fix, "gol_fuori_reale"] = gf_fix
+                st.session_state.registro.loc[idx_fix, "risultato_il"] = \
+                    datetime.now().strftime("%Y-%m-%d %H:%M") + " (corretto)"
+                st.success("Risultato corretto. Riscarica il CSV per salvare.")
+                st.rerun()
+
     vista = reg.copy()
     for col in ["p1", "px", "p2", "p_over25", "p_gg"]:
         vista[col] = (vista[col].astype(float) * 100).round(1)
